@@ -54,3 +54,9 @@ echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.
 # Update APT and install Jenkins
 sudo apt-get update -y
 sudo apt-get install -y jenkins
+
+# Configure Jenkins to run on port 8090
+sudo sed -i 's/HTTP_PORT=8080/HTTP_PORT=8090/g' /etc/default/jenkins
+
+# Restart Jenkins to apply the new port
+sudo systemctl restart jenkins
