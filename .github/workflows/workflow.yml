@@ -77,40 +77,48 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Found instance ID: $INSTANCE_ID"
 
-      - name: Copy Application Files to EC2
+      - name: Set up JDK 17
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: maven
+
+      - name: Build with Maven
+        working-directory: ./repo-root/springboot-app/springboot-demo
+        run: mvn clean package
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        id: docker_build
+        uses: docker/build-push-action@v5
+        with:
+          context: ./repo-root/springboot-app/springboot-demo
+          push: true
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/springboot-demo:latest
+
+      - name: Deploy to EC2
         run: |
-          # Create a temporary directory for the application files
-          mkdir -p ./app-to-deploy
-          cp -r ./repo-root/springboot-app/springboot-demo/* ./app-to-deploy/
-          
-          # Create a tar file
-          tar -czf app.tar.gz -C ./app-to-deploy .
-          
-          # Upload to S3 temporarily
-          aws s3 mb s3://springboot-app-deploy-${{ steps.get-instance.outputs.instance_id }} || true
-          aws s3 cp app.tar.gz s3://springboot-app-deploy-${{ steps.get-instance.outputs.instance_id }}/
-          
-          # Download on EC2 and build/run
+          # Deploy to EC2
           aws ssm send-command \
             --instance-ids "${{ steps.get-instance.outputs.instance_id }}" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"mkdir -p ~/springboot-app\", \
-                                  \"aws s3 cp s3://springboot-app-deploy-${{ steps.get-instance.outputs.instance_id }}/app.tar.gz ~/springboot-app/\", \
-                                  \"cd ~/springboot-app && tar -xzf app.tar.gz\", \
-                                  \"cd ~/springboot-app && mvn clean package\", \
-                                  \"docker stop springboot-app || true\", \
+            --parameters "commands=[\"docker stop springboot-app || true\", \
                                   \"docker rm springboot-app || true\", \
-                                  \"cd ~/springboot-app && docker build -t springboot-app:latest .\", \
-                                  \"docker run -d --name springboot-app -p 8080:8080 springboot-app:latest\", \
+                                  \"docker pull ${{ secrets.DOCKERHUB_USERNAME }}/springboot-demo:latest\", \
+                                  \"docker run -d --name springboot-app -p 8080:8080 ${{ secrets.DOCKERHUB_USERNAME }}/springboot-demo:latest\", \
                                   \"sleep 5\", \
                                   \"docker ps\", \
                                   \"curl -v http://localhost:8080\"]" \
             --output text
-
-      - name: Cleanup S3 Bucket
-        run: |
-          aws s3 rm s3://springboot-app-deploy-${{ steps.get-instance.outputs.instance_id }} --recursive
-          aws s3 rb s3://springboot-app-deploy-${{ steps.get-instance.outputs.instance_id }}
           
       - name: Print Access URLs
         run: |
