@@ -98,15 +98,6 @@ jobs:
 
       - name: Deploy to EC2 via AWS SSM
         run: |
-          # Create deployment script
-          cat > deploy.sh << 'EOL'
-          #!/bin/bash
-          docker stop springboot-app || true
-          docker rm springboot-app || true
-          docker pull ${IMAGE_URI}
-          docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}
-          EOL
-          
           # Get instance ID from IP address
           INSTANCE_ID=$(aws ec2 describe-instances \
             --filters "Name=ip-address,Values=${{ needs.terraform-apply.outputs.ec2_ip }}" \
@@ -119,8 +110,10 @@ jobs:
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"docker stop springboot-app || true\", \"docker rm springboot-app || true\", \"docker pull ${IMAGE_URI}\", \"docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}\"]" \
+            --parameters "commands=[\"docker stop springboot-app || true\", \"docker rm springboot-app || true\", \"docker pull ${IMAGE_URI}\", \"docker run -d -p 0.0.0.0:8090:8080 --name springboot-app ${IMAGE_URI}\", \"docker ps\", \"curl -v localhost:8090\"]" \
             --output text
+          
+          echo "Application deployed. Access at http://${{ needs.terraform-apply.outputs.ec2_ip }}:8090"
         env:
           IMAGE_URI: ${{ steps.build.outputs.image_uri }}
 
