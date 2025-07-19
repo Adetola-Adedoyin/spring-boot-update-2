@@ -27,6 +27,11 @@ apt install -y unzip
 unzip awscliv2.zip
 ./aws/install
 
+# Install SSM Agent (should be pre-installed on Ubuntu 22.04, but ensure it's running)
+apt install -y amazon-ssm-agent
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
+
 # Create application directory
 mkdir -p /opt/app
 chown ubuntu:ubuntu /opt/app

@@ -17,6 +17,42 @@ resource "tls_private_key" "dev" {
   algorithm = "RSA"
   rsa_bits  = 4096
 }
+# IAM role for SSM
+resource "aws_iam_role" "ssm_role" {
+  name = "${var.project_name}-${var.environment}-ssm-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Action = "sts:AssumeRole"
+        Effect = "Allow"
+        Principal = {
+          Service = "ec2.amazonaws.com"
+        }
+      }
+    ]
+  })
+
+  tags = {
+    Name        = "${var.project_name}-${var.environment}-ssm-role"
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+# Attach SSM policy to role
+resource "aws_iam_role_policy_attachment" "ssm_policy" {
+  role       = aws_iam_role.ssm_role.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
+}
+
+# Create instance profile
+resource "aws_iam_instance_profile" "ssm_profile" {
+  name = "${var.project_name}-${var.environment}-ssm-profile"
+  role = aws_iam_role.ssm_role.name
+}
+
 # EC2 Instance
 resource "aws_instance" "main" {
   ami                         = data.aws_ami.ubuntu.id
@@ -27,6 +63,7 @@ resource "aws_instance" "main" {
   associate_public_ip_address = true
   user_data                   = var.user_data
   user_data_replace_on_change = true
+  iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
 
   root_block_device {
     volume_type           = "gp3"

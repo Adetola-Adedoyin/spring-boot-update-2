@@ -96,25 +96,33 @@ jobs:
           docker push $IMAGE_URI
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
-      - name: Setup SSH Key
+      - name: Deploy to EC2 via AWS SSM
         run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/private_key
-          chmod 600 ~/.ssh/private_key
-          # Debug key format
-          file ~/.ssh/private_key
+          # Create deployment script
+          cat > deploy.sh << 'EOL'
+          #!/bin/bash
+          docker stop springboot-app || true
+          docker rm springboot-app || true
+          docker pull ${IMAGE_URI}
+          docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}
+          EOL
           
-      - name: Deploy to EC2 via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ needs.terraform-apply.outputs.ec2_ip }}
-          username: ubuntu
-          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
-          script: |
-            docker stop springboot-app || true
-            docker rm springboot-app || true
-            docker pull ${{ steps.build.outputs.image_uri }}
-            docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}
+          # Get instance ID from IP address
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=ip-address,Values=${{ needs.terraform-apply.outputs.ec2_ip }}" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+          
+          echo "Found instance ID: $INSTANCE_ID"
+          
+          # Send command via SSM
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"docker stop springboot-app || true\", \"docker rm springboot-app || true\", \"docker pull ${IMAGE_URI}\", \"docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}\"]" \
+            --output text
+        env:
+          IMAGE_URI: ${{ steps.build.outputs.image_uri }}
 
   terraform-destroy:
     name: Terraform Destroy (Manual Approval)
