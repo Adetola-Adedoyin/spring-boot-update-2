@@ -94,7 +94,7 @@ jobs:
             ./repo-root/springboot-app/springboot-demo
           docker push $IMAGE_URI
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
-      - name: Check Port Usage on EC2
+      - name: Deploy to EC2 via AWS SSM
         run: |
           # Get instance ID from IP address
           INSTANCE_ID=$(aws ec2 describe-instances \
@@ -104,72 +104,16 @@ jobs:
           
           echo "Found instance ID: $INSTANCE_ID"
           
-          # Check what's using port 8080
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"sudo lsof -i :8080\", \"sudo netstat -tulpn | grep 8080\", \"ps aux | grep -i jenkins\"]" \
-            --output text
-            
-      - name: Deploy to EC2 via AWS SSM
-        run: |
-          # Get instance ID from IP address
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=ip-address,Values=${{ needs.terraform-apply.outputs.ec2_ip }}" \
-            --query "Reservations[0].Instances[0].InstanceId" \
-            --output text)
-          
-          # Kill any process using port 8080
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\"sudo fuser -k 8080/tcp || true\"]" \
-            --output text
-          
-          # Deploy the application with detailed diagnostics
+          # Deploy the application
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters "commands=[\
-              \"echo 'Stopping and removing existing container...'\", \
               \"docker stop springboot-app || true\", \
               \"docker rm springboot-app || true\", \
-              \"echo 'Pulling image...'\", \
-              \"docker pull ${IMAGE_URI} || echo 'Failed to pull image'\", \
-              \"echo 'Docker images available:'\", \
-              \"docker images\", \
-              \"echo 'Running container...'\", \
-              \"docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI} || echo 'Failed to start container'\", \
-              \"echo 'Docker processes:'\", \
-              \"docker ps -a\", \
-              \"echo 'Docker system info:'\", \
-              \"docker info\", \
-              \"echo 'Disk space:'\", \
-              \"df -h\"\
-            ]" \
-            --output text
-        env:
-          IMAGE_URI: ${{ steps.build.outputs.image_uri }}
-            
-      - name: Verify Container is Running
-        run: |
-          # Get instance ID from IP address
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=ip-address,Values=${{ needs.terraform-apply.outputs.ec2_ip }}" \
-            --query "Reservations[0].Instances[0].InstanceId" \
-            --output text)
-          
-          # Check container status
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\
-              \"echo 'Container Status:'\", \
-              \"docker ps -a | grep springboot-app\", \
-              \"echo 'Container Logs:'\", \
-              \"docker logs springboot-app\", \
-              \"echo 'Application Health Check:'\", \
-              \"curl -v http://localhost:8080\"\
+              \"docker pull ${IMAGE_URI}\", \
+              \"docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}\", \
+              \"docker ps\"\
             ]" \
             --output text
         env:
@@ -187,6 +131,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
@@ -195,6 +146,25 @@ jobs:
       - name: Terraform Init
         working-directory: terraform/envs/dev
         run: terraform init
+
+      - name: Terminate EC2 Instances First
+        run: |
+          # Find and terminate EC2 instances with the project tag
+          INSTANCE_IDS=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=springboot-devops" "Name=instance-state-name,Values=running" \
+            --query "Reservations[*].Instances[*].InstanceId" \
+            --output text)
+          
+          if [ -n "$INSTANCE_IDS" ]; then
+            echo "Terminating instances: $INSTANCE_IDS"
+            aws ec2 terminate-instances --instance-ids $INSTANCE_IDS
+            
+            # Wait for instances to terminate
+            echo "Waiting for instances to terminate..."
+            aws ec2 wait instance-terminated --instance-ids $INSTANCE_IDS
+          else
+            echo "No running instances found"
+          fi
 
       - name: Terraform Destroy
         working-directory: terraform/envs/dev
