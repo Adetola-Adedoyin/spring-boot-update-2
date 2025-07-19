@@ -142,14 +142,7 @@ jobs:
           COMMAND_ID=$(aws ssm send-command \
             --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
             --document-name "AWS-RunShellScript" \
-            --parameters commands=[\
-              "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws",\
-              "docker stop springboot-app || true",\
-              "docker rm springboot-app || true",\
-              "docker pull ${{ steps.build.outputs.image_uri }}",\
-              "docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}",\
-              "docker ps -a"\
-            ] \
+            --parameters '{"commands":["aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws", "docker stop springboot-app || true", "docker rm springboot-app || true", "docker pull ${{ steps.build.outputs.image_uri }}", "docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}", "docker ps -a"]}' \
             --output text \
             --query "Command.CommandId")
           
