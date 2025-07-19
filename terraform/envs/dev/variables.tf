@@ -36,4 +36,8 @@ variable "allowed_cidr_blocks" {
   default     = ["0.0.0.0/0"]
 }
 
-# EC2 public key variable removed as we're using SSM for access
+variable "ec2_public_key" {
+  description = "Public key for SSH access to EC2 instances"
+  type        = string
+  sensitive   = true
+}

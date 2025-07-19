@@ -35,10 +35,14 @@ jobs:
 
       - name: Terraform Plan
         working-directory: terraform/envs/dev
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
         run: terraform plan
 
       - name: Terraform Apply
         working-directory: terraform/envs/dev
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
         run: terraform apply -auto-approve
 
       - name: Extract EC2 Public IP
@@ -100,13 +104,42 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Found instance ID: $INSTANCE_ID"
 
+      - name: Wait for SSM Agent to be ready
+        run: |
+          echo "Waiting for SSM Agent to be ready on instance ${{ steps.get-instance-id.outputs.instance_id }}..."
+          # Wait for up to 5 minutes for the instance to be ready for SSM commands
+          timeout=300
+          interval=10
+          elapsed=0
+          
+          while [ $elapsed -lt $timeout ]; do
+            STATUS=$(aws ssm describe-instance-information \
+              --filters "Key=InstanceIds,Values=${{ steps.get-instance-id.outputs.instance_id }}" \
+              --query "InstanceInformationList[0].PingStatus" \
+              --output text 2>/dev/null || echo "NotReady")
+              
+            if [ "$STATUS" = "Online" ]; then
+              echo "SSM Agent is online and ready!"
+              break
+            fi
+            
+            echo "Waiting for SSM Agent to come online... ($elapsed/$timeout seconds)"
+            sleep $interval
+            elapsed=$((elapsed + interval))
+          done
+          
+          if [ $elapsed -ge $timeout ]; then
+            echo "Timed out waiting for SSM Agent to be ready"
+            exit 1
+          fi
+
       - name: Deploy to EC2 via SSM
         run: |
           echo "Deploying to instance ${{ steps.get-instance-id.outputs.instance_id }}"
           echo "Using image: ${{ steps.build.outputs.image_uri }}"
           
           # Create SSM document with deployment commands
-          aws ssm send-command \
+          COMMAND_ID=$(aws ssm send-command \
             --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
             --document-name "AWS-RunShellScript" \
             --parameters commands=[\
@@ -117,6 +150,21 @@ jobs:
               "docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}",\
               "docker ps -a"\
             ] \
+            --output text \
+            --query "Command.CommandId")
+          
+          echo "SSM Command ID: $COMMAND_ID"
+          
+          # Wait for command to complete
+          aws ssm wait command-executed \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ steps.get-instance-id.outputs.instance_id }}"
+          
+          # Get command output
+          aws ssm get-command-invocation \
+            --command-id "$COMMAND_ID" \
+            --instance-id "${{ steps.get-instance-id.outputs.instance_id }}" \
+            --query "StandardOutputContent" \
             --output text
 
   terraform-destroy:
@@ -168,4 +216,6 @@ jobs:
 
       - name: Terraform Destroy
         working-directory: terraform/envs/dev
+        env:
+          TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
         run: terraform destroy -auto-approve

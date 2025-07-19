@@ -13,7 +13,10 @@ data "aws_ami" "ubuntu" {
     values = ["hvm"]
   }
 }
-# SSH key generation removed as we're using SSM for access
+resource "tls_private_key" "dev" {
+  algorithm = "RSA"
+  rsa_bits  = 4096
+}
 # Generate random suffix for unique resource names
 resource "random_id" "role_suffix" {
   byte_length = 4
@@ -76,7 +79,7 @@ EOF
 resource "aws_instance" "main" {
   ami                         = data.aws_ami.ubuntu.id
   instance_type               = var.instance_type
-  # key_name removed to disable SSH access
+  key_name                    = var.key_name
   vpc_security_group_ids      = [var.security_group_id]
   subnet_id                   = var.subnet_id
   associate_public_ip_address = true
