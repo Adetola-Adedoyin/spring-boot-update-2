@@ -35,3 +35,9 @@ variable "allowed_cidr_blocks" {
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }
+
+variable "ec2_public_key" {
+  description = "Public key for SSH access to EC2 instances"
+  type        = string
+  sensitive   = true
+}

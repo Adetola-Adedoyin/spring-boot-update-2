@@ -96,36 +96,25 @@ jobs:
           docker push $IMAGE_URI
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-        with:
-          terraform_version: ${{ env.TF_VERSION }}
-          
-      - name: Get Terraform Private Key
+      - name: Setup SSH Key
         run: |
-          cd terraform/envs/dev
-          terraform init
           mkdir -p ~/.ssh
-          terraform output -raw private_key > ~/.ssh/private_key
+          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/private_key
           chmod 600 ~/.ssh/private_key
+          # Debug key format
+          file ~/.ssh/private_key
           
       - name: Deploy to EC2 via SSH
-        run: |
-          # Add host key verification
-          ssh-keyscan -H ${{ needs.terraform-apply.outputs.ec2_ip }} >> ~/.ssh/known_hosts
-          
-          # Debug SSH connection
-          ssh -v -i ~/.ssh/private_key -o StrictHostKeyChecking=accept-new ubuntu@${{ needs.terraform-apply.outputs.ec2_ip }} "echo Connected successfully"
-          
-          # Run deployment commands
-          ssh -i ~/.ssh/private_key ubuntu@${{ needs.terraform-apply.outputs.ec2_ip }} << EOF
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ needs.terraform-apply.outputs.ec2_ip }}
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_PRIVATE_KEY }}
+          script: |
             docker stop springboot-app || true
             docker rm springboot-app || true
-            docker pull ${IMAGE_URI}
-            docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}
-          EOF
-        env:
-          IMAGE_URI: ${{ steps.build.outputs.image_uri }}
+            docker pull ${{ steps.build.outputs.image_uri }}
+            docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}
 
   terraform-destroy:
     name: Terraform Destroy (Manual Approval)
