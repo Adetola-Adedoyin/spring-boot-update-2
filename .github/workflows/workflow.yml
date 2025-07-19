@@ -77,29 +77,71 @@ jobs:
           echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
           echo "Found instance ID: $INSTANCE_ID"
 
-      - name: Deploy to EC2
+      - name: Prepare EC2 for Deployment
         run: |
           # Get the EC2 instance ID
           INSTANCE_ID=${{ steps.get-instance.outputs.instance_id }}
           
-          # Create a temporary directory for the application files
-          mkdir -p ./app-to-deploy
-          cp -r ./repo-root/springboot-app/springboot-demo/* ./app-to-deploy/
-          
-          # Create a tar file of the application
-          tar -czf app.tar.gz -C ./app-to-deploy .
-          
-          # Create a base64 encoded version of the tar file
-          BASE64_TAR=$(base64 -w 0 app.tar.gz)
-          
-          # Deploy using SSM Run Command
+          # Prepare the EC2 instance
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --parameters "commands=[\
+              \"rm -rf ~/springboot-app\", \
               \"mkdir -p ~/springboot-app\", \
-              \"echo '$BASE64_TAR' | base64 -d > ~/springboot-app.tar.gz\", \
-              \"tar -xzf ~/springboot-app.tar.gz -C ~/springboot-app\", \
+              \"mkdir -p ~/springboot-app/src/main/java/com/example/demo/controller\", \
+              \"mkdir -p ~/springboot-app/src/main/resources\", \
+              \"mkdir -p ~/springboot-app/target\"\
+            ]" \
+            --output text
+            
+      - name: Copy Application Files to EC2
+        run: |
+          # Get the EC2 instance ID
+          INSTANCE_ID=${{ steps.get-instance.outputs.instance_id }}
+          
+          # Copy pom.xml
+          POM_CONTENT=$(cat ./repo-root/springboot-app/springboot-demo/pom.xml)
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"echo '$POM_CONTENT' > ~/springboot-app/pom.xml\"]" \
+            --output text
+            
+          # Copy Dockerfile
+          DOCKERFILE_CONTENT=$(cat ./repo-root/springboot-app/springboot-demo/dockerfile)
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"echo '$DOCKERFILE_CONTENT' > ~/springboot-app/dockerfile\"]" \
+            --output text
+            
+          # Copy Java files
+          DEMO_APP=$(cat ./repo-root/springboot-app/springboot-demo/src/main/java/com/example/demo/DemoApplication.java)
+          CONTROLLER=$(cat ./repo-root/springboot-app/springboot-demo/src/main/java/com/example/demo/controller/HelloController.java)
+          
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"echo '$DEMO_APP' > ~/springboot-app/src/main/java/com/example/demo/DemoApplication.java\"]" \
+            --output text
+            
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\"echo '$CONTROLLER' > ~/springboot-app/src/main/java/com/example/demo/controller/HelloController.java\"]" \
+            --output text
+            
+      - name: Build and Run Application
+        run: |
+          # Get the EC2 instance ID
+          INSTANCE_ID=${{ steps.get-instance.outputs.instance_id }}
+          
+          # Build and run
+          aws ssm send-command \
+            --instance-ids "$INSTANCE_ID" \
+            --document-name "AWS-RunShellScript" \
+            --parameters "commands=[\
               \"cd ~/springboot-app\", \
               \"mvn clean package\", \
               \"docker stop springboot-app || true\", \
