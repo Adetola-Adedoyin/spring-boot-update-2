@@ -36,27 +36,16 @@ systemctl start amazon-ssm-agent
 mkdir -p /opt/app
 chown ubuntu:ubuntu /opt/app
 
-# Install Jenkins
+# Stop and disable any existing Jenkins service
+systemctl stop jenkins || true
+systemctl disable jenkins || true
 
-#!/bin/bash
-set -eux
+# Remove Jenkins if installed
+apt-get remove -y jenkins || true
+apt-get purge -y jenkins || true
 
-# Create keyrings directory if it doesn't exist
-sudo mkdir -p /etc/apt/keyrings
+# Kill any process using port 8080
+fuser -k 8080/tcp || true
 
-# Download Jenkins GPG key
-sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
-
-# Add Jenkins APT repository
-echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | \
-  sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-
-# Update APT and install Jenkins
-sudo apt-get update -y
-sudo apt-get install -y jenkins
-
-# Configure Jenkins to run on port 8090
-sudo sed -i 's/HTTP_PORT=8080/HTTP_PORT=8090/g' /etc/default/jenkins
-
-# Restart Jenkins to apply the new port
-sudo systemctl restart jenkins
+# Ensure port 8080 is free
+netstat -tulpn | grep 8080 || echo "Port 8080 is free"
