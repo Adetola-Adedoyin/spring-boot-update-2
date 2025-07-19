@@ -52,6 +52,38 @@ resource "aws_iam_role_policy_attachment" "ssm_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
 }
 
+# Add additional SSM permissions for command execution
+resource "aws_iam_role_policy" "ssm_command_policy" {
+  name = "${var.project_name}-${var.environment}-ssm-command-policy"
+  role = aws_iam_role.ssm_role.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ssm:SendCommand",
+          "ssm:GetCommandInvocation",
+          "ssm:ListCommandInvocations",
+          "ssm:DescribeInstanceInformation"
+        ]
+        Resource = "*"
+      },
+      {
+        Effect = "Allow"
+        Action = [
+          "ecr-public:GetAuthorizationToken",
+          "ecr-public:BatchCheckLayerAvailability",
+          "ecr-public:BatchGetImage",
+          "ecr-public:GetDownloadUrlForLayer"
+        ]
+        Resource = "*"
+      }
+    ]
+  })
+}
+
 # Create instance profile
 resource "aws_iam_instance_profile" "ssm_profile" {
   name = "${var.project_name}-${var.environment}-ssm-profile-${random_id.role_suffix.hex}"
