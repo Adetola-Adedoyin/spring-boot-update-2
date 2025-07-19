@@ -11,6 +11,16 @@ systemctl enable docker
 
 # Add ubuntu user to docker group
 usermod -a -G docker ubuntu
+newgrp docker
+
+# Configure AWS CLI for the ubuntu user
+mkdir -p /home/ubuntu/.aws
+cat > /home/ubuntu/.aws/config << EOF
+[default]
+region = us-east-1
+output = json
+EOF
+chown -R ubuntu:ubuntu /home/ubuntu/.aws
 
 # Install Java 17
 apt install -y openjdk-17-jdk
@@ -27,14 +37,11 @@ apt install -y unzip
 unzip awscliv2.zip
 ./aws/install
 
-# Install SSM Agent
-mkdir -p /tmp/ssm
-cd /tmp/ssm
-wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
-dpkg -i amazon-ssm-agent.deb
-systemctl enable amazon-ssm-agent
-systemctl start amazon-ssm-agent
-systemctl status amazon-ssm-agent
+# Install SSM Agent - Ubuntu specific method
+sudo snap install amazon-ssm-agent --classic
+sudo systemctl enable snap.amazon-ssm-agent.amazon-ssm-agent.service
+sudo systemctl start snap.amazon-ssm-agent.amazon-ssm-agent.service
+sudo systemctl status snap.amazon-ssm-agent.amazon-ssm-agent.service
 
 # Create application directory
 mkdir -p /opt/app

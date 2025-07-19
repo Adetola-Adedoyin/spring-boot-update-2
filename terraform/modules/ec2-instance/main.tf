@@ -58,6 +58,23 @@ resource "aws_iam_instance_profile" "ssm_profile" {
   role = aws_iam_role.ssm_role.name
 }
 
+# Combine user data with SSM installation script
+locals {
+  ssm_installation_script = <<-EOF
+#!/bin/bash
+# Install SSM Agent using wget
+mkdir -p /tmp/ssm
+cd /tmp/ssm
+wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
+dpkg -i amazon-ssm-agent.deb
+systemctl enable amazon-ssm-agent
+systemctl start amazon-ssm-agent
+EOF
+
+  # Combine user-provided script with SSM installation
+  combined_user_data = var.user_data != "" ? "${local.ssm_installation_script}\n${var.user_data}" : local.ssm_installation_script
+}
+
 # EC2 Instance
 resource "aws_instance" "main" {
   ami                         = data.aws_ami.ubuntu.id
@@ -66,7 +83,7 @@ resource "aws_instance" "main" {
   vpc_security_group_ids      = [var.security_group_id]
   subnet_id                   = var.subnet_id
   associate_public_ip_address = true
-  user_data                   = var.user_data
+  user_data                   = local.combined_user_data
   user_data_replace_on_change = true
   iam_instance_profile        = aws_iam_instance_profile.ssm_profile.name
 

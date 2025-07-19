@@ -94,30 +94,32 @@ jobs:
             ./repo-root/springboot-app/springboot-demo
           docker push $IMAGE_URI
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
-      - name: Deploy to EC2 via AWS SSM
+      - name: Setup SSH key
         run: |
-          # Get instance ID from IP address
-          INSTANCE_ID=$(aws ec2 describe-instances \
-            --filters "Name=ip-address,Values=${{ needs.terraform-apply.outputs.ec2_ip }}" \
-            --query "Reservations[0].Instances[0].InstanceId" \
-            --output text)
+          echo "${{ secrets.EC2_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
+          mkdir -p ~/.ssh
           
-          echo "Found instance ID: $INSTANCE_ID"
+      - name: Deploy to EC2 via SSH
+        run: |
+          echo "Deploying to ${{ needs.terraform-apply.outputs.ec2_ip }}"
+          echo "Using image: ${{ steps.build.outputs.image_uri }}"
           
-          # Deploy the application
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\
-              \"docker stop springboot-app || true\", \
-              \"docker rm springboot-app || true\", \
-              \"docker pull ${IMAGE_URI}\", \
-              \"docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}\", \
-              \"docker ps -a\"\
-            ]" \
-            --output text
-        env:
-          IMAGE_URI: ${{ steps.build.outputs.image_uri }}
+          # Add host key to known hosts
+          ssh-keyscan -H ${{ needs.terraform-apply.outputs.ec2_ip }} >> ~/.ssh/known_hosts
+          
+          # Deploy via SSH
+          ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@${{ needs.terraform-apply.outputs.ec2_ip }} << 'ENDSSH'
+            # Login to ECR
+            aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
+            
+            # Deploy container
+            docker stop springboot-app || true
+            docker rm springboot-app || true
+            docker pull ${{ steps.build.outputs.image_uri }}
+            docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}
+            docker ps -a
+          ENDSSH
 
   terraform-destroy:
     name: Terraform Destroy (Manual Approval)
