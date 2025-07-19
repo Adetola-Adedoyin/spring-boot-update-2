@@ -27,25 +27,40 @@ apt install -y unzip
 unzip awscliv2.zip
 ./aws/install
 
-# Install SSM Agent (should be pre-installed on Ubuntu 22.04, but ensure it's running)
-apt install -y amazon-ssm-agent
+# Install SSM Agent
+mkdir -p /tmp/ssm
+cd /tmp/ssm
+wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
+dpkg -i amazon-ssm-agent.deb
 systemctl enable amazon-ssm-agent
 systemctl start amazon-ssm-agent
+systemctl status amazon-ssm-agent
 
 # Create application directory
 mkdir -p /opt/app
 chown ubuntu:ubuntu /opt/app
 
-# Stop and disable any existing Jenkins service
-systemctl stop jenkins || true
-systemctl disable jenkins || true
+# Install Jenkins
 
-# Remove Jenkins if installed
-apt-get remove -y jenkins || true
-apt-get purge -y jenkins || true
+#!/bin/bash
+set -eux
 
-# Kill any process using port 8080
-fuser -k 8080/tcp || true
+# Create keyrings directory if it doesn't exist
+sudo mkdir -p /etc/apt/keyrings
 
-# Ensure port 8080 is free
-netstat -tulpn | grep 8080 || echo "Port 8080 is free"
+# Download Jenkins GPG key
+sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
+
+# Add Jenkins APT repository
+echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | \
+  sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
+
+# Update APT and install Jenkins
+sudo apt-get update -y
+sudo apt-get install -y jenkins
+
+# Configure Jenkins to run on port 8090
+sudo sed -i 's/HTTP_PORT=8080/HTTP_PORT=8090/g' /etc/default/jenkins
+
+# Restart Jenkins to apply the new port
+sudo systemctl restart jenkins
