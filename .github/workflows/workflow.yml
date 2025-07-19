@@ -104,20 +104,6 @@ jobs:
           
           echo "Found instance ID: $INSTANCE_ID"
           
-          # Stop Jenkins and free port 8080 before deploying
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\
-              \"sudo systemctl stop jenkins || true\", \
-              \"sudo systemctl disable jenkins || true\", \
-              \"sudo fuser -k 8080/tcp || true\", \
-              \"sudo netstat -tulpn | grep 8080 || echo 'Port 8080 is free'\"\
-            ]" \
-            --output text
-          
-          sleep 5
-          
           # Deploy the application
           aws ssm send-command \
             --instance-ids "$INSTANCE_ID" \
@@ -128,21 +114,6 @@ jobs:
               \"docker pull ${IMAGE_URI}\", \
               \"docker run -d -p 8080:8080 --name springboot-app ${IMAGE_URI}\", \
               \"docker ps -a\"\
-            ]" \
-            --output text
-          
-          # Wait for container to start
-          sleep 5
-          
-          # Check container status
-          aws ssm send-command \
-            --instance-ids "$INSTANCE_ID" \
-            --document-name "AWS-RunShellScript" \
-            --parameters "commands=[\
-              \"echo 'Container status:'\", \
-              \"docker ps -a\", \
-              \"echo 'Container logs:'\", \
-              \"docker logs springboot-app || echo 'No logs available'\"\
             ]" \
             --output text
         env:
