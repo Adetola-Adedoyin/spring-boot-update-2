@@ -35,14 +35,10 @@ jobs:
 
       - name: Terraform Plan
         working-directory: terraform/envs/dev
-        env:
-          TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
         run: terraform plan
 
       - name: Terraform Apply
         working-directory: terraform/envs/dev
-        env:
-          TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
         run: terraform apply -auto-approve
 
       - name: Extract EC2 Public IP
@@ -94,32 +90,34 @@ jobs:
             ./repo-root/springboot-app/springboot-demo
           docker push $IMAGE_URI
           echo "image_uri=$IMAGE_URI" >> $GITHUB_OUTPUT
-      - name: Setup SSH key
+      - name: Get EC2 Instance ID
+        id: get-instance-id
         run: |
-          echo "${{ secrets.EC2_PRIVATE_KEY }}" > private_key.pem
-          chmod 600 private_key.pem
-          mkdir -p ~/.ssh
-          
-      - name: Deploy to EC2 via SSH
+          INSTANCE_ID=$(aws ec2 describe-instances \
+            --filters "Name=tag:Project,Values=springboot-devops" "Name=tag:Environment,Values=dev" "Name=instance-state-name,Values=running" \
+            --query "Reservations[0].Instances[0].InstanceId" \
+            --output text)
+          echo "instance_id=$INSTANCE_ID" >> $GITHUB_OUTPUT
+          echo "Found instance ID: $INSTANCE_ID"
+
+      - name: Deploy to EC2 via SSM
         run: |
-          echo "Deploying to ${{ needs.terraform-apply.outputs.ec2_ip }}"
+          echo "Deploying to instance ${{ steps.get-instance-id.outputs.instance_id }}"
           echo "Using image: ${{ steps.build.outputs.image_uri }}"
           
-          # Add host key to known hosts
-          ssh-keyscan -H ${{ needs.terraform-apply.outputs.ec2_ip }} >> ~/.ssh/known_hosts
-          
-          # Deploy via SSH
-          ssh -o StrictHostKeyChecking=no -i private_key.pem ubuntu@${{ needs.terraform-apply.outputs.ec2_ip }} << 'ENDSSH'
-            # Login to ECR
-            aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws
-            
-            # Deploy container
-            docker stop springboot-app || true
-            docker rm springboot-app || true
-            docker pull ${{ steps.build.outputs.image_uri }}
-            docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}
-            docker ps -a
-          ENDSSH
+          # Create SSM document with deployment commands
+          aws ssm send-command \
+            --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters commands=[\
+              "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws",\
+              "docker stop springboot-app || true",\
+              "docker rm springboot-app || true",\
+              "docker pull ${{ steps.build.outputs.image_uri }}",\
+              "docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}",\
+              "docker ps -a"\
+            ] \
+            --output text
 
   terraform-destroy:
     name: Terraform Destroy (Manual Approval)
@@ -170,6 +168,4 @@ jobs:
 
       - name: Terraform Destroy
         working-directory: terraform/envs/dev
-        env:
-          TF_VAR_ec2_public_key: ${{ secrets.EC2_PUBLIC_KEY }}
         run: terraform destroy -auto-approve

@@ -14,10 +14,7 @@ variable "instance_type" {
   default     = "t2.micro"
 }
 
-variable "key_name" {
-  description = "AWS Key Pair name for EC2 access"
-  type        = string
-}
+# key_name variable removed as we're using SSM for access
 
 variable "security_group_id" {
   description = "Security group ID for the instance"
