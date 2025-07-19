@@ -133,32 +133,82 @@ jobs:
             exit 1
           fi
 
-      - name: Deploy to EC2 via SSM
+      - name: Deploy to EC2 via SSM with debugging
         run: |
           echo "Deploying to instance ${{ steps.get-instance-id.outputs.instance_id }}"
           echo "Using image: ${{ steps.build.outputs.image_uri }}"
           
-          # Create SSM document with deployment commands
-          COMMAND_ID=$(aws ssm send-command \
+          # Run a simple test command first to verify SSM is working
+          echo "Testing SSM with a simple command..."
+          TEST_COMMAND_ID=$(aws ssm send-command \
             --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
             --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws", "docker stop springboot-app || true", "docker rm springboot-app || true", "docker pull ${{ steps.build.outputs.image_uri }}", "docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }}", "docker ps -a"]}' \
+            --parameters '{"commands":["echo \"SSM Test: Hello World\"", "whoami", "pwd"]}' \
             --output text \
             --query "Command.CommandId")
           
-          echo "SSM Command ID: $COMMAND_ID"
+          echo "Test SSM Command ID: $TEST_COMMAND_ID"
           
-          # Wait for command to complete
-          aws ssm wait command-executed \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ steps.get-instance-id.outputs.instance_id }}"
+          # Wait a moment for the command to execute
+          sleep 10
           
-          # Get command output
-          aws ssm get-command-invocation \
-            --command-id "$COMMAND_ID" \
-            --instance-id "${{ steps.get-instance-id.outputs.instance_id }}" \
-            --query "StandardOutputContent" \
-            --output text
+          # Check test command status
+          aws ssm list-commands \
+            --command-id "$TEST_COMMAND_ID" \
+            --query "Commands[0].Status"
+          
+          # Create SSM document with deployment commands - one at a time for better debugging
+          echo "Running deployment commands one by one..."
+          
+          # Step 1: Login to ECR
+          echo "Step 1: Login to ECR"
+          LOGIN_COMMAND_ID=$(aws ssm send-command \
+            --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["aws --version", "aws ecr-public get-login-password --region us-east-1 | docker login --username AWS --password-stdin public.ecr.aws || echo \"ECR login failed\""]}' \
+            --output text \
+            --query "Command.CommandId")
+          
+          sleep 10
+          
+          # Step 2: Stop and remove existing container
+          echo "Step 2: Stop and remove existing container"
+          STOP_COMMAND_ID=$(aws ssm send-command \
+            --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["docker --version", "docker stop springboot-app || echo \"No container to stop\"", "docker rm springboot-app || echo \"No container to remove\""]}' \
+            --output text \
+            --query "Command.CommandId")
+          
+          sleep 10
+          
+          # Step 3: Pull and run new container
+          echo "Step 3: Pull and run new container"
+          DEPLOY_COMMAND_ID=$(aws ssm send-command \
+            --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
+            --document-name "AWS-RunShellScript" \
+            --parameters '{"commands":["docker pull ${{ steps.build.outputs.image_uri }} || echo \"Docker pull failed\"", "docker run -d -p 8080:8080 --name springboot-app ${{ steps.build.outputs.image_uri }} || echo \"Docker run failed\"", "docker ps -a"]}' \
+            --output text \
+            --query "Command.CommandId")
+          
+          echo "Deployment Command ID: $DEPLOY_COMMAND_ID"
+          
+          # Wait a bit longer for the deployment to complete
+          sleep 30
+          
+          # Check command status
+          echo "Checking command status:"
+          aws ssm list-commands \
+            --command-id "$DEPLOY_COMMAND_ID" \
+            --query "Commands[0].Status"
+          
+          # Try to get command output even if it failed
+          echo "Command output (if available):"
+          aws ssm list-command-invocations \
+            --command-id "$DEPLOY_COMMAND_ID" \
+            --details \
+            --query "CommandInvocations[0].CommandPlugins[0].Output" \
+            --output text || echo "Could not retrieve command output"
 
   terraform-destroy:
     name: Terraform Destroy (Manual Approval)
