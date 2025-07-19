@@ -17,9 +17,14 @@ resource "tls_private_key" "dev" {
   algorithm = "RSA"
   rsa_bits  = 4096
 }
+# Generate random suffix for unique resource names
+resource "random_id" "role_suffix" {
+  byte_length = 4
+}
+
 # IAM role for SSM
 resource "aws_iam_role" "ssm_role" {
-  name = "${var.project_name}-${var.environment}-ssm-role"
+  name = "${var.project_name}-${var.environment}-ssm-role-${random_id.role_suffix.hex}"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -35,7 +40,7 @@ resource "aws_iam_role" "ssm_role" {
   })
 
   tags = {
-    Name        = "${var.project_name}-${var.environment}-ssm-role"
+    Name        = "${var.project_name}-${var.environment}-ssm-role-${random_id.role_suffix.hex}"
     Environment = var.environment
     Project     = var.project_name
   }
@@ -49,7 +54,7 @@ resource "aws_iam_role_policy_attachment" "ssm_policy" {
 
 # Create instance profile
 resource "aws_iam_instance_profile" "ssm_profile" {
-  name = "${var.project_name}-${var.environment}-ssm-profile"
+  name = "${var.project_name}-${var.environment}-ssm-profile-${random_id.role_suffix.hex}"
   role = aws_iam_role.ssm_role.name
 }
 
