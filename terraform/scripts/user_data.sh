@@ -37,40 +37,37 @@ apt install -y unzip
 unzip awscliv2.zip
 ./aws/install
 
-# Install SSM Agent using wget (more reliable than snap)
+# Install and ensure SSM Agent is running
 mkdir -p /tmp/ssm
 cd /tmp/ssm
 wget https://s3.amazonaws.com/ec2-downloads-windows/SSMAgent/latest/debian_amd64/amazon-ssm-agent.deb
 dpkg -i amazon-ssm-agent.deb
+
+# Make sure SSM agent starts on boot and is running now
 systemctl enable amazon-ssm-agent
 systemctl start amazon-ssm-agent
-systemctl status amazon-ssm-agent
+
+# Add a startup script to ensure SSM is always running
+cat > /etc/systemd/system/ssm-autostart.service << EOF
+[Unit]
+Description=Ensure SSM Agent is running
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash -c "systemctl is-active --quiet amazon-ssm-agent || systemctl restart amazon-ssm-agent"
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable the autostart service
+systemctl daemon-reload
+systemctl enable ssm-autostart.service
 
 # Create application directory
 mkdir -p /opt/app
 chown ubuntu:ubuntu /opt/app
 
-# Install Jenkins
-
-#!/bin/bash
-set -eux
-
-# Create keyrings directory if it doesn't exist
-sudo mkdir -p /etc/apt/keyrings
-
-# Download Jenkins GPG key
-sudo wget -O /etc/apt/keyrings/jenkins-keyring.asc https://pkg.jenkins.io/debian-stable/jenkins.io-2023.key
-
-# Add Jenkins APT repository
-echo "deb [signed-by=/etc/apt/keyrings/jenkins-keyring.asc] https://pkg.jenkins.io/debian-stable binary/" | \
-  sudo tee /etc/apt/sources.list.d/jenkins.list > /dev/null
-
-# Update APT and install Jenkins
-sudo apt-get update -y
-sudo apt-get install -y jenkins
-
-# Configure Jenkins to run on port 8090
-sudo sed -i 's/HTTP_PORT=8080/HTTP_PORT=8090/g' /etc/default/jenkins
-
-# Restart Jenkins to apply the new port
-sudo systemctl restart jenkins
+# Pull the Docker image from Docker Hub
+docker pull teeboss/springboot-demo:new
