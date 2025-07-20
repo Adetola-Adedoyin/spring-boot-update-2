@@ -71,3 +71,28 @@ chown ubuntu:ubuntu /opt/app
 
 # Pull the Docker image from Docker Hub
 docker pull teeboss/springboot-demo:new
+
+# Create a systemd service to ensure the container starts on boot
+cat > /etc/systemd/system/springboot-app.service << EOF
+[Unit]
+Description=Spring Boot Application Container
+Requires=docker.service
+After=docker.service
+
+[Service]
+Restart=always
+ExecStartPre=-/usr/bin/docker stop springboot-app
+ExecStartPre=-/usr/bin/docker rm springboot-app
+ExecStart=/usr/bin/docker run --name springboot-app -p 8080:8080 teeboss/springboot-demo:new
+ExecStop=/usr/bin/docker stop springboot-app
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+# Enable and start the service
+systemctl daemon-reload
+systemctl enable springboot-app.service
+
+# Don't start it now since the workflow will handle the first run
+# systemctl start springboot-app.service

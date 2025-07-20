@@ -141,12 +141,26 @@ jobs:
           
           sleep 10
           
-          # Step 2: Pull and run Docker Hub image
-          echo "Step 2: Pull and run Docker Hub image"
+          # Step 2: Pull and run Docker Hub image with debugging
+          echo "Step 2: Pull and run Docker Hub image with debugging"
           DEPLOY_COMMAND_ID=$(aws ssm send-command \
             --instance-ids ${{ steps.get-instance-id.outputs.instance_id }} \
             --document-name "AWS-RunShellScript" \
-            --parameters '{"commands":["docker pull teeboss/springboot-demo:new || echo \"Docker pull failed\"", "docker run -d -p 8080:8080 --name springboot-app teeboss/springboot-demo:new || echo \"Docker run failed\"", "docker ps -a"]}' \
+            --parameters '{"commands":[
+              "docker pull teeboss/springboot-demo:new || echo \"Docker pull failed\"", 
+              "echo \"Running container in debug mode first...\"",
+              "docker run --name springboot-debug teeboss/springboot-demo:new echo \"Testing if container can start\"",
+              "docker rm springboot-debug",
+              "echo \"Now running actual container...\"",
+              "docker run -d -p 8080:8080 --restart always --name springboot-app teeboss/springboot-demo:new",
+              "echo \"Container started with ID: $(docker ps -a --filter name=springboot-app --format {{.ID}})\"",
+              "sleep 3",
+              "echo \"Container status:\"",
+              "docker ps -a --filter name=springboot-app --format \"{{.Image}} {{.Status}} {{.Names}}\"",
+              "echo \"Container logs:\"",
+              "docker logs springboot-app || echo \"No logs available\"",
+              "echo \"Checking port 8080:\"",
+              "netstat -tulpn | grep 8080 || echo \"Port 8080 not in use\""]}' \
             --output text \
             --query "Command.CommandId")
           
